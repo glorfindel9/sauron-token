@@ -18,7 +18,7 @@ contract TokenSale is Ownable {
     IERC20 token;
     uint256 index;
     uint256 public activeRound;
-    uint256 balanceReceived;
+    address tokenOwner;
 
     struct Round {
         uint256 index;
@@ -30,8 +30,16 @@ contract TokenSale is Ownable {
         uint256 quantitySold;
     }
 
+    event PurchaseToken(
+        address _to,
+        uint256 _amount,
+        uint256 _tokenPriceInWei,
+        uint256 _timestamp
+    );
+
     constructor(address _token) {
         token = IERC20(_token);
+        tokenOwner = msg.sender;
     }
 
     function createRound(
@@ -64,13 +72,11 @@ contract TokenSale is Ownable {
         return round.quantityToken - round.quantitySold;
     }
 
-    event PurchaseToken(address _from, address _to, uint256 _amount);
-
     function purchase() public payable {
         Round memory round = rounds[activeRound];
         uint256 current = uint256(block.timestamp);
         require(
-            round.startDate <= current && round.endDate <= current,
+            round.startDate <= current && round.endDate >= current,
             "Token not open for sale yet"
         );
         require(msg.value >= round.tokenPriceInWei, "Not enough money sent");
@@ -78,30 +84,36 @@ contract TokenSale is Ownable {
         uint256 remainder = msg.value -
             tokensToTransfer *
             round.tokenPriceInWei;
-        address owner = owner();
-        console.log("got here", owner);
-        token.transferFrom(owner, msg.sender, tokensToTransfer);
+        token.transferFrom(tokenOwner, msg.sender, tokensToTransfer);
         payable(msg.sender).transfer(remainder);
-        emit PurchaseToken(owner, msg.sender, msg.value);
-        balanceReceived += tokensToTransfer;
+        emit PurchaseToken(
+            msg.sender,
+            msg.value,
+            round.tokenPriceInWei,
+            block.timestamp
+        );
+        payable(this).transfer(tokensToTransfer * round.tokenPriceInWei);
     }
 
     fallback() external payable {
-        balanceReceived += msg.value;
+        payable(this).transfer(msg.value);
     }
 
     receive() external payable {
-        balanceReceived += msg.value;
+        payable(this).transfer(msg.value);
     }
 
-    function withdrawMoney(address payable _to, uint256 _amount) public {
-        require(_amount <= balanceReceived, "not enough funds");
-        balanceReceived -= _amount;
+    function withdrawMoney(address payable _to, uint256 _amount)
+        public
+        onlyOwner
+    {
+        uint256 balance = address(this).balance;
+        require(_amount <= balance, "balance not enough");
+        balance -= _amount;
         _to.transfer(_amount);
     }
 
-    function withdrawAllMoney(address payable _to) public {
-        balanceReceived = 0;
-        _to.transfer(balanceReceived);
+    function withdrawAllMoney(address payable _to) public onlyOwner {
+        _to.transfer(address(this).balance);
     }
 }
